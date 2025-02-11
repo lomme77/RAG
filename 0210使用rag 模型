@@ -1,0 +1,78 @@
+from langchain_community.document_loaders import HuggingFaceDatasetLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_huggingface import HuggingFaceEmbeddings, HuggingFacePipeline
+from langchain_community.vectorstores import FAISS
+from transformers import AutoTokenizer, AutoModelForQuestionAnswering
+from transformers import pipeline
+from langchain.chains import RetrievalQA
+
+# 定义模型路径
+modelPath = "sentence-transformers/all-MiniLM-l6-v2"
+
+# 设定模型参数 - 确保与创建索引时完全一致
+model_kwargs = {'device': 'cpu'}
+encode_kwargs = {'normalize_embeddings': False}
+
+# 初始化 HuggingFaceEmbeddings
+embeddings = HuggingFaceEmbeddings(
+    model_name=modelPath,     
+    model_kwargs=model_kwargs, 
+    encode_kwargs=encode_kwargs
+)
+
+# 添加详细的路径检查
+index_path = "0210faiss_index"
+
+# 加载FAISS索引
+db = FAISS.load_local(
+    index_path, 
+    embeddings, 
+    allow_dangerous_deserialization=True  # 添加这个参数
+)
+
+# 修改模型加载部分，使用本地模型路径
+local_model_path = "./local_model"  # 本地模型路径
+
+# 从本地加载标记器和模型
+try:
+    tokenizer = AutoTokenizer.from_pretrained(local_model_path)
+    model = AutoModelForQuestionAnswering.from_pretrained(local_model_path)
+    
+    # 使用本地模型和标记器定义问答管道
+    question_answerer = pipeline(
+        "question-answering",
+        model=model,  # 直接使用加载的模型
+        tokenizer=tokenizer,
+        return_tensors='pt'
+    )
+    
+    # 创建HuggingFacePipeline实例
+    llm = HuggingFacePipeline(
+        pipeline=question_answerer,
+        model_kwargs={"temperature": 0.7, "max_length": 512},
+    )
+    
+    
+except Exception as e:
+    print(f"加载本地模型时出错: {str(e)}")
+    print(f"请确认模型文件夹 {local_model_path} 是否存在且包含完整的模型文件")
+
+# 修改后的检索器部分
+retriever = db.as_retriever(search_kwargs={"k": 4})
+
+# 使用RetrievalQA类创建一个带有检索器、链类型“refine”和不返回源文档选项的问答实例（qa）。
+qa = RetrievalQA.from_chain_type(llm=llm, chain_type="refine", retriever=retriever, return_source_documents=False)
+
+# 定义问题
+question = "What is Virgin Australia"
+retrieved_docs = retriever.get_relevant_documents(question)
+context = retrieved_docs[0].page_content
+# 修改 qa.run 调用，传入问题字符串
+input_data = {
+    "query": question,   # 问题
+    "context": context  # 背景信息
+}
+
+# 获取答案
+result = qa.run(input_data)
+print(result)
