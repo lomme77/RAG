@@ -1,0 +1,41 @@
+from langchain_community.document_loaders import HuggingFaceDatasetLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_huggingface import HuggingFaceEmbeddings, HuggingFacePipeline
+from langchain_community.vectorstores import FAISS
+from langchain.chains import RetrievalQA
+import ollama  # 导入Ollama库
+from langchain_community.llms import Ollama
+
+# 定义Ollama模型名称
+llm = Ollama(model="deepseek-r1:latest")
+
+# 加载FAISS索引
+index_path = "0210faiss_index"
+embeddings = HuggingFaceEmbeddings(
+    model_name="sentence-transformers/all-MiniLM-l6-v2",
+    model_kwargs={'device': 'cpu'},
+    encode_kwargs={'normalize_embeddings': False}
+)
+
+# 加载FAISS索引
+db = FAISS.load_local(index_path, embeddings, allow_dangerous_deserialization=True)
+
+# 设置检索器
+retriever = db.as_retriever(search_kwargs={"k": 4})
+
+# 创建问答实例
+qa = RetrievalQA.from_chain_type(llm=llm, chain_type="refine", retriever=retriever, return_source_documents=False)
+
+# 定义问题
+question = "what is the top speed of a Kia Stinger?"
+
+# 检索相关文档
+retrieved_docs = retriever.get_relevant_documents(question)
+context = retrieved_docs[0].page_content
+print(context)
+
+# 获取答案
+result = qa.run(query=question, context=context)
+print(result)
+
+
