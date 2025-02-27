@@ -1,0 +1,63 @@
+from langchain_community.vectorstores import FAISS
+from langchain.schema import Document
+from langchain_huggingface import HuggingFaceEmbeddings
+
+# 配置嵌入模型
+modelPath = "sentence-transformers/all-MiniLM-l6-v2"
+model_kwargs = {'device': 'cpu'}
+encode_kwargs = {'normalize_embeddings': False}
+
+embeddings = HuggingFaceEmbeddings(
+    model_name=modelPath,
+    model_kwargs=model_kwargs,
+    encode_kwargs=encode_kwargs
+)
+
+# 加载 FAISS 索引
+db = FAISS.load_local("smic_faiss_index", embeddings, allow_dangerous_deserialization=True)
+
+# 读取保存的文档
+output_file_path = "smic_docs.txt"
+
+# 读取文件内容并按空行拆分
+with open(output_file_path, "r", encoding="utf-8") as file:
+    saved_docs = file.read()
+
+docs = saved_docs.split("\n\n")
+docs = [doc.strip() for doc in docs if doc.strip()]  # 清理空白行
+
+# 执行查询，假设你有一个查询字符串
+query = "电路晶圆代工核心技术体系是什么"
+query_vector = embeddings.embed_query(query)
+
+# 执行相似度搜索
+results = db.similarity_search(query, k=5)
+print("查询结果:")
+for res in results:
+    print(res.page_content)
+
+# 获取上下3段上下文
+def get_context(documents, docs, window_size=3):
+    context = []
+    for doc in documents:
+        # 找到文档在原始文本中的索引
+        doc_idx = docs.index(doc.page_content)
+        start = max(0, doc_idx - window_size)
+        end = min(len(docs), doc_idx + window_size + 1)
+        
+        # 提取上下文段落
+        context.append(docs[start:end])
+    
+    return context
+
+# 获取上下文
+context = get_context(results, docs, window_size=3)
+
+# 打印最接近的3个文档和它们的上下文
+for i, doc in enumerate(results):
+    print(f"Result {i+1}:")
+    print(doc.page_content)
+    print("Context:")
+    for c in context[i]:
+        print(c)
+    print("\n" + "="*50 + "\n")
